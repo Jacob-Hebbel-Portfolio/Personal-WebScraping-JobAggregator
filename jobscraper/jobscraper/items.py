@@ -13,13 +13,12 @@ class JobscraperItem(Item):
 
 class Job(Item):
     
-    role = Field()
+    title = Field()
     level = Field()
     company = Field()
+    jobLink = Field()
     location = Field()
     payRange = Field()
-    saveLink = Field()
-    applyLink = Field()
     employment = Field()
     timePosted = Field()
     numApplicants = Field()
