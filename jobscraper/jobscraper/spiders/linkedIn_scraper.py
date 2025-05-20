@@ -1,5 +1,4 @@
 import scrapy
-from scrapy_selenium import SeleniumRequest
 
 class LinkedinScraperSpider(scrapy.Spider):
     name = "linkedIn-scraper"

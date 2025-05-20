@@ -16,7 +16,7 @@ ADDONS = {}
 
 # Selenium Settings
 SELENIUM_DRIVER_NAME = 'chrome'
-SELENIUM_DRIVER_EXECUTABLE_PATH = 'C:\Program Files\chromedriver-win64'
+SELENIUM_DRIVER_EXECUTABLE_PATH = r'C:\Users\jacob\harp\projects\portfolio\job-posting-aggregator\chromedriver-win64\chromedriver.exe'
 SELENIUM_DRIVER_ARGUMENTS = ['--headless']
 
 
@@ -60,7 +60,6 @@ ROBOTSTXT_OBEY = False
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 DOWNLOADER_MIDDLEWARES = {
-    "jobscraper.middlewares.JobscraperDownloaderMiddleware": 543,
     'scrapy_selenium.SeleniumMiddleware': 800
 }
 

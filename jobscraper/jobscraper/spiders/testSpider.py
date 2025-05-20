@@ -1,28 +1,39 @@
 import scrapy
 from scrapy_selenium import SeleniumRequest
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as EC
 
 class TestspiderSpider(scrapy.Spider):
     name = "testSpider"
 
     def start_requests(self):
         url = r"https://www.linkedin.com/jobs/view/creative-manager-at-uniqlo-4232936215?position=3&pageNum=0&refId=KpPRhDApm5BvkwjWZGV1%2Bg%3D%3D&trackingId=onAMwMYaqnotlCy8OUX%2F1g%3D%3D"
-        yield SeleniumRequest(url=url, callback=self.parse, wait_time=10)
+        yield SeleniumRequest(url=url,
+                              callback=self.parse,
+                              wait_time=10, 
+                              wait_until=EC.presence_of_element_located((By.XPATH, '//*[contains(@class, "num-applicants__caption")]'))
+        )
 
     def parse(self, response):
 
-        jobPage = response.css("main section div")
+        jobInfo = response.css("div.details")
 
-        card = jobPage.css("section")[1].css("div div div")
-        description = jobPage.css("div")
-
+        card = jobInfo.css("div[class*='info']")[1]
+        description = jobInfo.css("div")
         
+
         # card has role, company, location, time posted, numApplicants, apply / save hrefs.
         role = card.css("h1::text").get().strip()
         company = card.css("h4 div a::text").get().strip()
-        location = card.css("h4 div span::text").get().strip()
-        timePosted = card.css()
+        location = card.css("h4 div span")[1].css("::text").get().strip()
+        timePosted = card.css("h4 div span")[2].css("::text").get().strip()
+        numApplications = response.xpath('//*[contains(@class, "num-applicants__caption")]/text()').get().strip()
 
-    def async_parse(self, response):
-        print("starting process")
+        things = [role, company, location, timePosted, numApplications]
+
+        for thing in things:
+            print(thing)
+
+        print("*"*25 + "*"*25)
 
 
