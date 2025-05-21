@@ -11,16 +11,20 @@ class JobscraperItem(Item):
     # name = scrapy.Field()
     pass
 
-class Job(Item):
+class JobItem(Item):
     
+    url = Field()
     title = Field()
     level = Field()
+    fields = Field()
+    salary = Field()
     company = Field()
-    jobLink = Field()
     location = Field()
-    payRange = Field()
+    industries = Field()
     employment = Field()
     timePosted = Field()
+    scrapedFrom = Field()
     numApplicants = Field()
+    
     
     
