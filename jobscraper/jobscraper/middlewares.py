@@ -8,7 +8,6 @@ from scrapy import signals
 # useful for handling different item types with a single interface
 from itemadapter import ItemAdapter
 
-
 class JobscraperSpiderMiddleware:
     # Not all methods need to be defined. If a method is not defined,
     # scrapy acts as if the spider middleware does not modify the
@@ -98,3 +97,96 @@ class JobscraperDownloaderMiddleware:
 
     def spider_opened(self, spider):
         spider.logger.info("Spider opened: %s" % spider.name)
+
+
+
+import requests
+from random import randint
+from urllib.parse import urlencode
+
+class ScrapeOpsFakeBrowserHeaderAgentMiddleware:
+    
+    @classmethod
+    def from_crawler(cls, crawler):
+        return cls(crawler.settings)
+    
+    def __init__(self, settings):
+        self.scrapeops_api_key = settings.get("SCRAPEOPS_API_KEY")
+        self.scrapeops_endpoint = settings.get("SCRAPEOPS_FAKE_BROWSER_HEADER_ENDPOINT", "https://headers.scrapeops.io/v1/browser-headers")
+        self.scrapeops_fake_browser_headers_active = settings.get("SCRAPEOPS_FAKE_BROWSER_HEADER_ENABLED", True)
+        self.scrapeops_num_results = settings.get("SCRAPEOPS_NUM_RESULTS")
+        self.headers_list = []
+        self._get_headers_list()
+        self._scrapeops_fake_browser_headers_enabled()
+
+    def _get_headers_list(self):
+        payload = {'api_key': self.scrapeops_api_key}
+        if self.scrapeops_num_results is not None:
+            payload['num_results'] = self.scrapeops_num_results
+        
+        response = requests.get(self.scrapeops_endpoint, params=urlencode(payload))
+        jsonResponse = response.json()
+
+        self.headers_list = jsonResponse.get('result', [])
+
+        headers_to_fake = ['accept-language', 'sec-fetch-user', 'sec-fetch-mode', 'sec-fetch-site',
+                   'sec-ch-ua-platform', 'sec-ch-ua-mobile', 'sec-ch-ua', 'accept', 'user-agent',
+                   'upgrade-insecure-requests']
+        
+        self.headers_list = [
+            fake_headers for fake_headers in self.headers_list
+            if all(header in fake_headers.keys() for header in headers_to_fake)
+        ]
+
+    
+    def _get_random_browser_header(self):
+        
+        randomIndex = randint(0, len(self.headers_list) - 1)
+        return self.headers_list[randomIndex]
+    
+
+    def _scrapeops_fake_browser_headers_enabled(self):
+
+        if self.scrapeops_api_key is None or self.scrapeops_api_key == '' or self.scrapeops_fake_browser_headers_active == False:
+            self.scrapeops_fake_browser_headers_active = False
+        else:
+            self.scrapeops_fake_browser_headers_active = True
+
+    
+    def process_request(self, request, spider):
+        fake_headers = self._get_random_browser_header()
+
+        headers_to_fake = ['accept-language', 'sec-fetch-user', 'sec-fetch-mode', 'sec-fetch-site',
+                   'sec-ch-ua-platform', 'sec-ch-ua-mobile', 'sec-ch-ua', 'accept', 'user-agent', 
+                   'upgrade-insecure-requests']
+
+        for header in headers_to_fake:
+            request.headers[header] = fake_headers[header]
+
+        print("*"*25 + "NEW HEADERS ATTACHED" + "*"*25)
+        print(request.headers)
+
+
+
+from scrapy_selenium.middleware import SeleniumMiddleware
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium import webdriver
+
+class ProxySeleniumMiddleware(SeleniumMiddleware):
+
+    def _get_driver(self, request):
+        
+        # prevents window from opening every time I crawl
+        driverOptions = Options()
+        driverOptions.add_argument("--headless=new")  
+
+        # assigns the proxy from the rotating proxy list setting
+        proxy = request.meta.get('proxy')
+        if proxy:
+            driverOptions.add_argument(f"--proxy-server={proxy}")
+
+        service = Service(ChromeDriverManager().install())
+        driver = webdriver.Chrome(service=service, options=driverOptions)
+        return driver

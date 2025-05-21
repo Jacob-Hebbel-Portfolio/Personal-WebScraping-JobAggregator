@@ -20,6 +20,7 @@ class JobItem(Item):
     salary = Field()
     company = Field()
     location = Field()
+    currency = Field()
     industries = Field()
     employment = Field()
     timePosted = Field()

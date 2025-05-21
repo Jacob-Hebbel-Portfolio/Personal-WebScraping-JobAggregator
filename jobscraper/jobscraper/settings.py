@@ -19,7 +19,8 @@ SELENIUM_DRIVER_NAME = 'chrome'
 SELENIUM_DRIVER_EXECUTABLE_PATH = r'C:\Users\jacob\harp\projects\portfolio\job-posting-aggregator\chromedriver-win64\chromedriver.exe'
 SELENIUM_DRIVER_ARGUMENTS = ['--headless']
 
-
+# Rotating Proxy Settings
+ROTATING_PROXY_LIST = []
 
 
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
@@ -60,8 +61,13 @@ ROBOTSTXT_OBEY = False
 # Enable or disable downloader middlewares
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 DOWNLOADER_MIDDLEWARES = {
-    'scrapy_selenium.SeleniumMiddleware': 800
+    'jobscraper.middlewares.ScrapeOpsFakeBrowserHeaderAgentMiddleware': 400,
+    'rotating_proxies.middlewares.RotatingProxyMiddleware': 610,
+    'rotating_proxies.middlewares.BanDetectionMiddleware': 620,
+    'scrapy_selenium.ProxySeleniumMiddleware': 800,
+    'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
 }
+
 
 # Enable or disable extensions
 # See https://docs.scrapy.org/en/latest/topics/extensions.html
@@ -71,9 +77,9 @@ DOWNLOADER_MIDDLEWARES = {
 
 # Configure item pipelines
 # See https://docs.scrapy.org/en/latest/topics/item-pipeline.html
-#ITEM_PIPELINES = {
-#    "jobscraper.pipelines.JobscraperPipeline": 300,
-#}
+ITEM_PIPELINES = {
+    "jobscraper.pipelines.JobscraperPipeline": 300,
+}
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html

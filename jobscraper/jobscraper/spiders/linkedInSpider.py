@@ -1,24 +1,103 @@
 import scrapy
 from jobscraper.items import JobItem
+
+# selenium imports for waiting on requests 
 from scrapy_selenium import SeleniumRequest
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 
+# selenium imports for driver configs
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium import webdriver
+
+# misc
 import re
+import time
 
-class TestspiderSpider(scrapy.Spider):
-    name = "testSpider"
 
-    def start_requests(self):
-        url = r"https://www.linkedin.com/jobs/view/sales-manager-on-premise-national-accounts-at-fiji-water-4233859937?position=4&pageNum=0&refId=CeeBBJ6qQfCnPXPm9%2FJ%2Bwg%3D%3D&trackingId=wtLLgyi%2FhXMBY0%2BvhR4ITA%3D%3D"
-        yield SeleniumRequest(url=url,
-                              callback=self.parse,
-                              wait_time=10, 
-                              wait_until=EC.presence_of_element_located((By.XPATH, "//*[contains(@class, 'num-applicants__caption')]"))
-        )
+class LinkedinspiderSpider(scrapy.Spider):
+    name = "linkedInSpider"
+    allowed_domains = ["www.linkedin.com"]
+    start_urls = ["https://www.linkedin.com/jobs/search/"]
+
     
+    driver = webdriver.Chrome(ChromeDriverManager().install())
+    
+
+
+    proxy = request.meta['proxy']
+
+    # Set Chrome options
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")  # optional
+    chrome_options.add_argument(f"--proxy-server={proxy}")
+
+    # Set up driver with webdriver-manager and service object
+    service = Service(ChromeDriverManager().install())
+    driver = webdriver.Chrome(service=service, options=chrome_options)
+    driver.get("https://www.linkedin.com/jobs/search/")
+
     def parse(self, response):
         
+        numJobs = 0                         # tracks the amount of jobs generated
+        lastJobScraped = 0                  # tracks the next job to start scraping at
+        lastPageHeight = 0                  # tracks how scrolling effects page height
+        SCROLL_PAUSE_SECONDS = 1
+
+        # gets the tag storing every job posting
+        jobs = response.css("ul[class*='jobs-search__results-list']")
+
+
+        # this loop breaks when the webdriver can't scroll anymore,
+        # but its more concise to describe that in an if statement below
+        while True:
+            
+            # each li item inside jobs represents a job posting
+            numJobs = len(jobs.css('li'))                           # numJobs updates w/ new loaded jobs here
+
+            # for loop iterates from the first not-scraped job to the last job available,
+            # skipping previously-scraped jobs
+            for jobIndex in range(lastJobScraped, numJobs):
+
+                job = jobs.css('li')[jobIndex]
+                jobLink = job.css('a').attrib['href'].get().strip()
+
+                # page contains dynamic content; 
+                # By.XPATH finds this content and waits for it to render before requesting the page
+                # wait_time is a heuristic that skips the page if the content doesn't render in less than 10 seconds
+                yield SeleniumRequest(url=jobLink,
+                              callback=self.parseJob,
+                              wait_time=10, 
+                              wait_until=EC.presence_of_element_located((By.XPATH, "//*[contains(@class, 'num-applicants__caption')]"))
+                )
+
+            # ensures next for loop starts at an unseen job index
+            lastJobScraped = numJobs
+
+
+            # call to selenium web driver to scroll page, dynamically loading more jobs
+            lastPageHeight = driver.execute_script("return document.body.scrollHeight")
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(SCROLL_PAUSE_SECONDS)
+            newPageHeight = driver.execute_script("return document.body.scrollHeight")
+
+            if lastPageHeight == newPageHeight:
+                break
+
+            
+
+
+        
+        # this loop goes until no new jobs are generated anymore (possibly infinite???)
+        while True:
+            break
+            
+        
+
+
+    def parseJob(self, response):
         # this clause checks if the listing is still accepting applications
         # if it is not the listing item is skipped
         if response.css("figure[class*='closed']").get() is not None:
@@ -45,7 +124,7 @@ class TestspiderSpider(scrapy.Spider):
         
         # pulling data from card
         # card has title, company, location, time posted, numApplicants, apply / save hrefs.
-        title = card.css("h1[class*='title']::text").get().strip().split(",")[0]
+        title = card.css("h1[class*='title']::text").get().strip()
         company = card.css("a[class*='org-name']::text").get().strip()
         location = card.css("span[class*='bullet']::text").get().strip()
         timePosted = card.css("span[class*='posted-time']::text").get().strip()
@@ -137,3 +216,5 @@ class TestspiderSpider(scrapy.Spider):
             print(f"{key:<20}| {job[key]}")
 
         print("*"*25 + "*"*25)
+
+    
