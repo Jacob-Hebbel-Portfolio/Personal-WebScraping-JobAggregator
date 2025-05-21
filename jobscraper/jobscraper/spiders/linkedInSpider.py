@@ -1,16 +1,11 @@
 import scrapy
 from jobscraper.items import JobItem
+from scrapy.selector import Selector
 
 # selenium imports for waiting on requests 
 from scrapy_selenium import SeleniumRequest
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
-
-# selenium imports for driver configs
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium import webdriver
 
 # misc
 import re
@@ -22,47 +17,32 @@ class LinkedinspiderSpider(scrapy.Spider):
     allowed_domains = ["www.linkedin.com"]
     start_urls = ["https://www.linkedin.com/jobs/search/"]
 
-    
-    driver = webdriver.Chrome(ChromeDriverManager().install())
-    
-
-
-    proxy = request.meta['proxy']
-
-    # Set Chrome options
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")  # optional
-    chrome_options.add_argument(f"--proxy-server={proxy}")
-
-    # Set up driver with webdriver-manager and service object
-    service = Service(ChromeDriverManager().install())
-    driver = webdriver.Chrome(service=service, options=chrome_options)
-    driver.get("https://www.linkedin.com/jobs/search/")
 
     def parse(self, response):
         
-        numJobs = 0                         # tracks the amount of jobs generated
+        driver = response.meta['driver']    # makes the page generate dynamic content 
         lastJobScraped = 0                  # tracks the next job to start scraping at
-        lastPageHeight = 0                  # tracks how scrolling effects page height
-        SCROLL_PAUSE_SECONDS = 1
-
-        # gets the tag storing every job posting
-        jobs = response.css("ul[class*='jobs-search__results-list']")
+        ACTION_PAUSE_SECONDS = 2            # time between page scrolls (wait for the jobs to load)
 
 
-        # this loop breaks when the webdriver can't scroll anymore,
-        # but its more concise to describe that in an if statement below
         while True:
             
-            # each li item inside jobs represents a job posting
-            numJobs = len(jobs.css('li'))                           # numJobs updates w/ new loaded jobs here
+            page = driver.page_source
+            sel = Selector(text=page)
+            jobs = sel.css("ul[class*='jobs-search__results-list'] li")
+            numJobs = len(jobs)
+
+
+            # case of nothing to scrape
+            if numJobs == 0:
+                break  
+            
 
             # for loop iterates from the first not-scraped job to the last job available,
             # skipping previously-scraped jobs
             for jobIndex in range(lastJobScraped, numJobs):
-
-                job = jobs.css('li')[jobIndex]
-                jobLink = job.css('a').attrib['href'].get().strip()
+                job = jobs[jobIndex]
+                jobLink = job.css('a::attr(href)').get().strip()
 
                 # page contains dynamic content; 
                 # By.XPATH finds this content and waits for it to render before requesting the page
@@ -77,27 +57,32 @@ class LinkedinspiderSpider(scrapy.Spider):
             lastJobScraped = numJobs
 
 
-            # call to selenium web driver to scroll page, dynamically loading more jobs
-            lastPageHeight = driver.execute_script("return document.body.scrollHeight")
-            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(SCROLL_PAUSE_SECONDS)
-            newPageHeight = driver.execute_script("return document.body.scrollHeight")
+            try:
+                # button is present ==> scrolling doesn't make more jobs ==> button click makes more jobs
+                button = driver.find_element(By.XPATH, "//button[contains(@class, '__show-more-button')]")
+                button.click()
+                time.sleep(ACTION_PAUSE_SECONDS)
+            
+            except Exception:
+                # button is not present ==> scrolling makes more jobs appear
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(ACTION_PAUSE_SECONDS)
 
-            if lastPageHeight == newPageHeight:
+            
+            page = driver.page_source
+            sel = Selector(text=page)
+            newJobs = len(sel.css("ul[class*='jobs-search__results-list'] li"))
+
+
+            # checks if driver process caused dynamic content to generate. if not, kill program
+            if newJobs == lastJobScraped:
                 break
-
-            
-
-
         
-        # this loop goes until no new jobs are generated anymore (possibly infinite???)
-        while True:
-            break
             
-        
-
 
     def parseJob(self, response):
+       
+       
         # this clause checks if the listing is still accepting applications
         # if it is not the listing item is skipped
         if response.css("figure[class*='closed']").get() is not None:
