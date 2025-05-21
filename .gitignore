@@ -1,2 +1,4 @@
 /VirtualEnvironment/
 /chrome*/
+.env
+/output/
