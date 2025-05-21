@@ -19,21 +19,29 @@ class TestspiderSpider(scrapy.Spider):
     
     def parse(self, response):
         
+        # this clause checks if the listing is still accepting applications
+        # if it is not the listing item is skipped
         if response.css("figure[class*='closed']").get() is not None:
             print("no longer accepting applications")
             #return
 
+
+
+        # job object will be our abstract datatype for representing job postings
         job = JobItem()
         
+
+
         # parses the id from the url, gets the url in a neater / shorter form
         regex = r"\d+"
         id = re.findall(regex, response.url.split("?")[0])[0]
         url = f"https://linkedin.com/jobs/view/{id}"
         
-        # page can be broken into card and desc sections
-        jobInfo = response.css("div.details")
-        card = jobInfo.css("div[class*='info']")[1]
-        description = jobInfo.css("div[class*='posting__details']")
+
+
+        # page can be broken into card and description sections
+        card = response.css("div[class*='info']")[1]
+        description = response.css("div[class*='posting__details']")
         
         # pulling data from card
         # card has title, company, location, time posted, numApplicants, apply / save hrefs.
@@ -42,6 +50,7 @@ class TestspiderSpider(scrapy.Spider):
         location = card.css("span[class*='bullet']::text").get().strip()
         timePosted = card.css("span[class*='posted-time']::text").get().strip()
         numApplicants = response.xpath("//*[contains(@class, 'num-applicants__caption')]/text()").get().strip()
+
 
 
         # pulling data from description
@@ -81,15 +90,28 @@ class TestspiderSpider(scrapy.Spider):
              if string.get() is not None
              and string.get().strip() is not None])
         
-        regex = r"(?:\$|£|€|₹|¥)?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?(?:\s*(?:-|to)\s*(?:\$|£|€|₹|¥)?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?)?"
-        salaryOrNone = sorted(re.findall(regex, descAsString), key=len) # puts the longest match (most likely to be salary) at the back
 
-        salary = salaryOrNone[-1].strip() if salaryOrNone is not [] and len(salaryOrNone[-1].strip()) > 5 else None
+        # regex breakdown:
+        # (?:\$|£|€|₹|¥)? | looks for an optional currency indicator. if present, it is a part of the capture
+        # \s*\d{1,3}      | allows for any (including none) amount of whitespace between currency indicator and a number with 1 to 3 decimal places. this number must exist for the capture to happen
+        # (?:,\d{3})*     | allows for any (including none) amount of groupings of 3 numbers followed by a comma. if present, it is a part of the capture
+        # (?:\.\d+)?      | allows for zero or one pattern of a decimal point "." followed by at least one number. if present, it is a part of the capture
+        # (?:\s*/\s*(?i:hr|hour|yr|year|mo|month))? | allows for any (including none) whitespace followed by a slash "/", the same whitespace clause, and then a case-insensitive string from the following. all of it is optional. this captures the rate of the pay
+        # (?:\s*(?:-|to)\s* | allows for any amount of whitespace followed by a range indicator ("-" or "to") followed by any amount of whitespace
+        # the rest is the same as before, but repeated for the second number in the range. 
+        # The clause starting with the previous explanation ends after the 2nd number's regex, and is entirely optional
+
+        # edge cases it will fail: it technically captures any number on the page. as a heuristic, I always take the biggest match and require this match to be at least 9 characters.
+        # This is no means perfect but rides the edge of excluding valid salaries at the expense of not collecting false data. This heuristic can be tweaked without error to the code
+        regex = r"(?:\$|£|€|₹|¥)?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?(?:\s*(?:-|to)\s*(?:\$|£|€|₹|¥)?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?)?"
+        possibleSalaries = sorted(re.findall(regex, descAsString), key=len) # puts the longest match (most likely to be salary) at the back
+
+        salary = possibleSalaries[-1].strip() if possibleSalaries is not [] and len(possibleSalaries[-1].strip()) > 8 else None
 
 
 
         # assigning the Job item its fields appropriately
-    
+        # all fields have been stripped of whitespace but no other formatting (except as list items for certain fields) has been applied
         job['url'] = url
         job['title'] = title
         job['level'] = level
@@ -103,6 +125,7 @@ class TestspiderSpider(scrapy.Spider):
         job['scrapedFrom'] = {"linkedIn": id}
         job['numApplicants'] = numApplicants
         
+        # an easy way to iterate through the job object
         keys = ['company', 'location', 'numApplicants', 'scrapedFrom', 'timePosted', 'title', 
             'url', 'salary', 'fields', 'level', 'employment', 'industries']
         keys.sort()
