@@ -10,13 +10,21 @@ from selenium.webdriver.support import expected_conditions as EC
 # misc
 import re
 import time
+from selenium.common.exceptions import NoSuchElementException
 
 
 class LinkedinspiderSpider(scrapy.Spider):
     name = "linkedInSpider"
     allowed_domains = ["www.linkedin.com"]
-    start_urls = ["https://www.linkedin.com/jobs/search/"]
+    visited = set()
 
+    # instead of start_urls use this so it calls SeleniumRequest
+    def start_requests(self):
+        yield SeleniumRequest(
+            url="https://www.linkedin.com/jobs/search/",
+            callback=self.parse,
+            wait_time=10  # optional, can also use wait_until
+        )
 
     def parse(self, response):
         
@@ -63,7 +71,7 @@ class LinkedinspiderSpider(scrapy.Spider):
                 button.click()
                 time.sleep(ACTION_PAUSE_SECONDS)
             
-            except Exception:
+            except NoSuchElementException:
                 # button is not present ==> scrolling makes more jobs appear
                 driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(ACTION_PAUSE_SECONDS)
@@ -76,31 +84,53 @@ class LinkedinspiderSpider(scrapy.Spider):
 
             # checks if driver process caused dynamic content to generate. if not, kill program
             if newJobs == lastJobScraped:
+                self.logger.info("*"*25 + f"\nweb driver did not generate new job content\nkilling process\n" + "*"*25)
                 break
         
             
 
     def parseJob(self, response):
        
-       
+        
         # this clause checks if the listing is still accepting applications
         # if it is not the listing item is skipped
         if response.css("figure[class*='closed']").get() is not None:
-            print("no longer accepting applications")
-            #return
+            self.logger.info("*"*25 + f"\n\ncurrent url is no longer accepting applications\n\n" + "*"*25)
+            return
 
 
+        # parses the id from url, compresses url
+        regex = r"/view/(\d+)"
+        match = re.search(regex, response.url)
 
-        # job object will be our abstract datatype for representing job postings
-        job = JobItem()
-        
+        if not match:
+            self.logger.warning(f"Could not extract job ID from URL: {response.url}")
+            return
 
-
-        # parses the id from the url, gets the url in a neater / shorter form
-        regex = r"\d+"
-        id = re.findall(regex, response.url.split("?")[0])[0]
+        id = match.group(1)
         url = f"https://linkedin.com/jobs/view/{id}"
+
+        if id in self.visited:
+            self.logger.warning("*" * 25 + f"\n\ncurrent url id was previously visited\n\n" + "*" * 25)
+            return
+        else:
+            self.visited.add(id)
+
+
+
+
+        '''
+        regex = r"\d+"
+        idMatches = re.findall(regex, response.url.split("?")[0])
+        url = f"https://linkedin.com/jobs/view/{idMatches[0]}" if idMatches != [] else response.url
         
+        id = idMatches[0] if idMatches != [] else None
+        if id in self.visited:
+            self.logger.info("*"*25 + f"\n\ncurrent url id was previously visited\n\n" + "*"*25)
+            return
+        else:
+            self.visited.add(id)'''
+
 
 
         # page can be broken into card and description sections
@@ -168,11 +198,13 @@ class LinkedinspiderSpider(scrapy.Spider):
         # edge cases it will fail: it technically captures any number on the page. as a heuristic, I always take the biggest match and require this match to be at least 9 characters.
         # This is no means perfect but rides the edge of excluding valid salaries at the expense of not collecting false data. This heuristic can be tweaked without error to the code
         regex = r"(?:\$|£|€|₹|¥)?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?(?:\s*(?:-|to)\s*(?:\$|£|€|₹|¥)?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?)?"
-        possibleSalaries = sorted(re.findall(regex, descAsString), key=len) # puts the longest match (most likely to be salary) at the back
+        salaryMatches = sorted(re.findall(regex, descAsString), key=len) # puts the longest match (most likely to be salary) at the back
 
-        salary = possibleSalaries[-1].strip() if possibleSalaries is not [] and len(possibleSalaries[-1].strip()) > 8 else None
+        salary = salaryMatches[-1].strip() if salaryMatches != [] and len(salaryMatches[-1].strip()) > 8 else None
 
 
+        # job item abstracts the linkedIn Posting into a class with several fields
+        job = JobItem()
 
         # assigning the Job item its fields appropriately
         # all fields have been stripped of whitespace but no other formatting (except as list items for certain fields) has been applied
@@ -189,17 +221,6 @@ class LinkedinspiderSpider(scrapy.Spider):
         job['scrapedFrom'] = {"linkedIn": id}
         job['numApplicants'] = numApplicants
         
-        # an easy way to iterate through the job object
-        keys = ['company', 'location', 'numApplicants', 'scrapedFrom', 'timePosted', 'title', 
-            'url', 'salary', 'fields', 'level', 'employment', 'industries']
-        keys.sort()
+        self.logger.info(f"\n\n\nScraped job: {job['title']} at {job['company']} for {job['salary'] if job['salary'] != None else 'x-x'}\n\n\n")
 
-        print("*"*25 + "*"*25)
-        print("result of scraping link\n")
-        
-        for key in keys:
-            print(f"{key:<20}| {job[key]}")
-
-        print("*"*25 + "*"*25)
-
-    
+        yield job

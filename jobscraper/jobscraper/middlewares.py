@@ -168,7 +168,7 @@ class ScrapeOpsFakeBrowserHeaderAgentMiddleware:
 
 
 
-from scrapy_selenium.middleware import SeleniumMiddleware
+from scrapy_selenium.middlewares import SeleniumMiddleware
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
@@ -180,7 +180,7 @@ class ProxySeleniumMiddleware(SeleniumMiddleware):
         
         # prevents window from opening every time I crawl
         driverOptions = Options()
-        driverOptions.add_argument("--headless=new")  
+        #driverOptions.add_argument("--headless=new")  
 
         # assigns the proxy from the rotating proxy list setting
         proxy = request.meta.get('proxy')

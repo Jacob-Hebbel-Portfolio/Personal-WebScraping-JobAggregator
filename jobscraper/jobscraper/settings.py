@@ -12,12 +12,13 @@ BOT_NAME = "jobscraper"
 SPIDER_MODULES = ["jobscraper.spiders"]
 NEWSPIDER_MODULE = "jobscraper.spiders"
 
+FEEDS = {}
+
 ADDONS = {}
 
 # Selenium Settings
 SELENIUM_DRIVER_NAME = 'chrome'
 SELENIUM_DRIVER_EXECUTABLE_PATH = r'C:\Users\jacob\harp\projects\portfolio\job-posting-aggregator\chromedriver-win64\chromedriver.exe'
-SELENIUM_DRIVER_ARGUMENTS = ['--headless']
 
 # Rotating Proxy Settings
 ROTATING_PROXY_LIST = []
@@ -64,7 +65,7 @@ DOWNLOADER_MIDDLEWARES = {
     'jobscraper.middlewares.ScrapeOpsFakeBrowserHeaderAgentMiddleware': 400,
     'rotating_proxies.middlewares.RotatingProxyMiddleware': 610,
     'rotating_proxies.middlewares.BanDetectionMiddleware': 620,
-    'scrapy_selenium.ProxySeleniumMiddleware': 800,
+    'jobscraper.middlewares.ProxySeleniumMiddleware': 800,
     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
 }
 

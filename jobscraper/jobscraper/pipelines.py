@@ -9,57 +9,62 @@ from itemadapter import ItemAdapter
 import re
 
 class JobscraperPipeline:
+
+    # formats items to be ready for insertion into a db
     def process_item(self, item, spider):
-        
 
         # set which fields should be lowercase here
         fieldsToBeLowercase = ['company', 'employment', 'fields', 'industries', 'level',
                                'location', 'title', 'timePosted']
         
         for field in fieldsToBeLowercase:
-            var = item[field] 
-
-            # applies lowercase to strings and lists successfully
-            item[field] = [v.lowercase() for v in var] if var is [] else var.lowercase()
+            
+            var = item[field]
+            if var is not None:
+                if isinstance(var, list):
+                    item[field] = [v.lower() for v in var if v is not None]
+                elif isinstance(var, str):
+                    item[field] = var.lower()
+            else:
+                item[field] = None
         
        
         # parses the number from the applicants field
-        regex = r"[0-9]"
-        var = re.findall(item['numApplicants'], regex)
-        item['numApplicants'] = var[0] if var != [] else None
+        if item['numApplicants'] is not None:
+            regex = r"\d+"
+            matches = re.findall(regex, item['numApplicants'])
+            item['numApplicants'] = matches[0] if matches != [] else None
 
 
 
         # populates the currency field
         # uses heuristic: if not provided assume $
         # easily add a currency option by appending to the regex
-        regex = r"\$|£|€|₹|¥"
-        var = re.findall(item['salary'], regex)[0]
-        item['currency'] = var[0] if var != [] else '$'
+        if item['salary'] is not None:
+            regex = r"\$|£|€|₹|¥"
+            matches = re.findall(regex, item['salary'])
+            item['currency'] = matches[0] if matches != [] else '$'
 
 
+        
 
         # turns salary into a 'range' with 2 indices, representing the low and high of the range
-        regex = r"\d{1,3}(,\d{3})*(\.[0-9]+)?"
-        var = re.findall(item['salary'], regex)
+        salary = item.get('salary')
+        if salary is not None:
 
-        if var == []:
-            # no match found
-            pass
-        
-        elif len(var) == 1:
-            # 1 match found ==> 1 number
-            var = var[0].replace(',', '')
-            item['salary'] = [float(var), float(var)]
+            matches = re.findall(r"\d{1,3}(?:,\d{3})*(?:\.[0-9]+)?", salary)
+            numbers = [float(m.replace(',', '')) for m in matches]
 
-        elif len(var) == 2:
-            # 2 matches found ==> true range
-            var = [v.replace(',', '') for v in var]
-            item['salary'] = sorted([float(v) for v in var])
-
+            if len(numbers) == 1:
+                item['salary'] = [numbers[0], numbers[0]]
+            elif len(numbers) == 2:
+                item['salary'] = sorted(numbers)
+            else:
+                item['salary'] = None
+                item['currency'] = None
         else:
-            # undefined behavior occurring; should throw exception?
-            pass
+            item['salary'] = None
+            item['currency'] = None
 
         
         
@@ -68,20 +73,25 @@ class JobscraperPipeline:
                        'hour': 1, 'hours': 1, 'day': 24, 'days': 24, 
                        'week': 7*24, 'weeks': 7*24, 'month': 30*24, 'months': 30*24, 'year': 365*24, 'years': 365*24}
         
-        var = item['timePosted'].split(" ")
+
+        var = item['timePosted'].split(" ") if item['timePosted'] is not None else ['24', 'hours', 'ago']
         
-        if len(var) != 3:
-            # undefined behavior, just put the number in there??
-            regex = r'/d'
-            var = re.findall(item['timePosted'], regex)
-            item['timePosted'] = float(var[0]) if var != [] else None
+        try:
+            
+            if len(var) == 3:
+                # case of successful split
+                number = float(var[0])
+                unit = var[1].lower()
+                item['timePosted'] = number * conversions.get(unit, 1.0) if unit in conversions.keys() else number
+            else:
+                # try extracting the number and assume it is in hours
+                regex = r"\d+"
+                matches = re.findall(regex, item['timePosted'])
+                item['timePosted'] = matches[0] if matches != [] else 24.0
 
-        else:
-            number = var[0].strip()
-            unit = var[1].strip()
-
-            # completes the conversion if the unit is in there. else it just puts the number in
-            item['timePosted'] = (float(number) * conversions[unit]) if unit in conversions.keys() else float(number)
+        except Exception as e:
+            spider.logger.warning(f"Failed to convert timePosted: '{item['timePosted']}' - {e}")
+            item['timePosted'] = 24.0
                 
 
         return item
