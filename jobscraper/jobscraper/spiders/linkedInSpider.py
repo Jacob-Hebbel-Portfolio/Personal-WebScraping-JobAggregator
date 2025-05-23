@@ -1,143 +1,97 @@
 import scrapy
 from jobscraper.items import JobItem
-from scrapy.selector import Selector
-
-# selenium imports for waiting on requests 
-from scrapy_selenium import SeleniumRequest
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
 
 # misc
 import re
-import time
-from selenium.common.exceptions import NoSuchElementException
+from util import loadDataFile
+from util import getSalary
+from util import LinkedInValidator
 
 
 class LinkedinspiderSpider(scrapy.Spider):
     name = "linkedInSpider"
     allowed_domains = ["www.linkedin.com"]
-    visited = set()
 
-    # instead of start_urls use this so it calls SeleniumRequest
+    # ========== spider entry ==========
     def start_requests(self):
-        yield SeleniumRequest(
-            url="https://www.linkedin.com/jobs/search/",
-            callback=self.parse,
-            wait_time=10  # optional, can also use wait_until
-        )
-
-    def parse(self, response):
         
-        driver = response.meta['driver']    # makes the page generate dynamic content 
-        lastJobScraped = 0                  # tracks the next job to start scraping at
-        ACTION_PAUSE_SECONDS = 2            # time between page scrolls (wait for the jobs to load)
+        # get search args
+        keywords = loadDataFile('keywords.txt')
+        locations = loadDataFile('locations.txt')
 
-
-        while True:
-            
-            page = driver.page_source
-            sel = Selector(text=page)
-            jobs = sel.css("ul[class*='jobs-search__results-list'] li")
-            numJobs = len(jobs)
-
-
-            # case of nothing to scrape
-            if numJobs == 0:
-                break  
-            
-
-            # for loop iterates from the first not-scraped job to the last job available,
-            # skipping previously-scraped jobs
-            for jobIndex in range(lastJobScraped, numJobs):
-                job = jobs[jobIndex]
-                jobLink = job.css('a::attr(href)').get().strip()
-
-                # page contains dynamic content; 
-                # By.XPATH finds this content and waits for it to render before requesting the page
-                # wait_time is a heuristic that skips the page if the content doesn't render in less than 10 seconds
-                yield SeleniumRequest(url=jobLink,
-                              callback=self.parseJob,
-                              wait_time=10, 
-                              wait_until=EC.presence_of_element_located((By.XPATH, "//*[contains(@class, 'num-applicants__caption')]"))
+        # loops over all args
+        for location in locations:
+            for keyword in keywords:
+                
+                # building url
+                root = "https://www.linkedin.com/jobs/search"
+                url = f"{root}?keywords={keyword}&location={location}"
+                self.logger.info(f"\n\nvisiting {url}\n\n")
+                
+                # sending request
+                yield scrapy.Request(
+                    url=url,
+                    callback=self.parseSearch
                 )
 
-            # ensures next for loop starts at an unseen job index
-            lastJobScraped = numJobs
 
+    def parseSearch(self, response):
 
-            try:
-                # button is present ==> scrolling doesn't make more jobs ==> button click makes more jobs
-                button = driver.find_element(By.XPATH, "//button[contains(@class, '__show-more-button')]")
-                button.click()
-                time.sleep(ACTION_PAUSE_SECONDS)
-            
-            except NoSuchElementException:
-                # button is not present ==> scrolling makes more jobs appear
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                time.sleep(ACTION_PAUSE_SECONDS)
-
-            
-            page = driver.page_source
-            sel = Selector(text=page)
-            newJobs = len(sel.css("ul[class*='jobs-search__results-list'] li"))
-
-
-            # checks if driver process caused dynamic content to generate. if not, kill program
-            if newJobs == lastJobScraped:
-                self.logger.info("*"*25 + f"\nweb driver did not generate new job content\nkilling process\n" + "*"*25)
-                break
+        jobs = response.css("ul[class*='jobs-search__results-list'] li")
         
-            
+        if len(jobs) == 0:
+            self.logger.warning(f"no jobs found at: {response.url}")
+            self.logger.warning(response.css("*").get()[:500])
+            return
+        else:
+            self.logger.info(f"successfully scraped {len(jobs)} job(s) from {response.url}")
+        for job in jobs:
+            jobLink = job.css('a::attr(href)').get()
+
+            if jobLink is not None:
+                yield response.follow(jobLink.strip().split('?')[0])
+            else:
+                self.logger.warning(f"could not find job page from {response.url}")
+
 
     def parseJob(self, response):
        
+        self.logger.info(f"reached page: {response.url}")
+        self.logger.info(f"starting parsing process. page preview:\n{response.css('*').get()[:500] if response.css('*').get() is not None else 'No page content available'}")
+
+
+        # ========== error checking ==========
+
+        if LinkedInValidator.validates(response, self.logger):
+            pass
+        else:
+            return
         
-        # this clause checks if the listing is still accepting applications
-        # if it is not the listing item is skipped
-        if response.css("figure[class*='closed']").get() is not None:
-            self.logger.info("*"*25 + f"\n\ncurrent url is no longer accepting applications\n\n" + "*"*25)
-            return
 
+        # ========== url/id and page parsing ========== 
 
-        # parses the id from url, compresses url
-        regex = r"/view/(\d+)"
-        match = re.search(regex, response.url)
+        # parsing id & url
+        regex = r"\d+"
+        rootURL = response.url.split('?')[0]
+        matches = re.findall(regex, rootURL)
 
-        if not match:
+        # skips if id is missing
+        if matches == []:
             self.logger.warning(f"Could not extract job ID from URL: {response.url}")
+            self.logger.info(f"skipping url: {response.url}")
             return
-
-        id = match.group(1)
+        
+        id = sorted(matches)[-1]        # heuristic: id is usually long, assume it is the longest matching number
         url = f"https://linkedin.com/jobs/view/{id}"
 
-        if id in self.visited:
-            self.logger.warning("*" * 25 + f"\n\ncurrent url id was previously visited\n\n" + "*" * 25)
-            return
-        else:
-            self.visited.add(id)
 
-
-
-
-        '''
-        regex = r"\d+"
-        idMatches = re.findall(regex, response.url.split("?")[0])
-        url = f"https://linkedin.com/jobs/view/{idMatches[0]}" if idMatches != [] else response.url
-        
-        id = idMatches[0] if idMatches != [] else None
-        if id in self.visited:
-            self.logger.info("*"*25 + f"\n\ncurrent url id was previously visited\n\n" + "*"*25)
-            return
-        else:
-            self.visited.add(id)'''
-
-
-
-        # page can be broken into card and description sections
+        # splitting page
         card = response.css("div[class*='info']")[1]
         description = response.css("div[class*='posting__details']")
         
-        # pulling data from card
+
+        # ========== parsing card ==========
+
         # card has title, company, location, time posted, numApplicants, apply / save hrefs.
         title = card.css("h1[class*='title']::text").get().strip()
         company = card.css("a[class*='org-name']::text").get().strip()
@@ -146,18 +100,16 @@ class LinkedinspiderSpider(scrapy.Spider):
         numApplicants = response.xpath("//*[contains(@class, 'num-applicants__caption')]/text()").get().strip()
 
 
-
-        # pulling data from description
-        # criteria gets us area, level, employment, and industries
-        # after I parse the whole description for the pay range using regex (BLEHHH)
+        # ========== parsing description ==========
+        
+        # criteria gets area, level, employment, and industries
         criteria = description.css("ul[class*='criteria'] li")
 
-        # pulls the level and employment data
         level = criteria[0].css('span::text').get().strip()
         employment = criteria[1].css('span::text').get().strip()
         
-        # pulling fields data
-        # I'm formatting fields as a list of keywords
+        
+        # choosing to format fields & industries as lists of keywords
         l = criteria[2].css('span::text').get().strip().split(", ")
         s = l[-1].split(" and ") if len(l) == 1 else l[-1].split("and ")
         l.pop()
@@ -165,8 +117,6 @@ class LinkedinspiderSpider(scrapy.Spider):
                   if keyword is not None 
                   and keyword.strip() != '']
 
-        # pulling industries data
-        # I'm formatting industries as a list of keywords
         l = criteria[3].css('span::text').get().strip().split(", ")
         s = l[-1].split(" and ") if len(l) == 1 else l[-1].split("and ")
         l.pop()
@@ -174,40 +124,13 @@ class LinkedinspiderSpider(scrapy.Spider):
                   if keyword is not None 
                   and keyword.strip() != '']
 
+        salary = getSalary(description)
 
 
-        # parsing the description for the salary
-        # getting the description text as one string w/out the html characters
-        descAsString = " ".join(
-            [string.get().strip() 
-             for string in description.css("* *::text") 
-             if string.get() is not None
-             and string.get().strip() is not None])
-        
+        # ========== item assignment ==========
 
-        # regex breakdown:
-        # (?:\$|£|€|₹|¥)? | looks for an optional currency indicator. if present, it is a part of the capture
-        # \s*\d{1,3}      | allows for any (including none) amount of whitespace between currency indicator and a number with 1 to 3 decimal places. this number must exist for the capture to happen
-        # (?:,\d{3})*     | allows for any (including none) amount of groupings of 3 numbers followed by a comma. if present, it is a part of the capture
-        # (?:\.\d+)?      | allows for zero or one pattern of a decimal point "." followed by at least one number. if present, it is a part of the capture
-        # (?:\s*/\s*(?i:hr|hour|yr|year|mo|month))? | allows for any (including none) whitespace followed by a slash "/", the same whitespace clause, and then a case-insensitive string from the following. all of it is optional. this captures the rate of the pay
-        # (?:\s*(?:-|to)\s* | allows for any amount of whitespace followed by a range indicator ("-" or "to") followed by any amount of whitespace
-        # the rest is the same as before, but repeated for the second number in the range. 
-        # The clause starting with the previous explanation ends after the 2nd number's regex, and is entirely optional
-
-        # edge cases it will fail: it technically captures any number on the page. as a heuristic, I always take the biggest match and require this match to be at least 9 characters.
-        # This is no means perfect but rides the edge of excluding valid salaries at the expense of not collecting false data. This heuristic can be tweaked without error to the code
-        regex = r"(?:\$|£|€|₹|¥)?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?(?:\s*(?:-|to)\s*(?:\$|£|€|₹|¥)?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?)?"
-        salaryMatches = sorted(re.findall(regex, descAsString), key=len) # puts the longest match (most likely to be salary) at the back
-
-        salary = salaryMatches[-1].strip() if salaryMatches != [] and len(salaryMatches[-1].strip()) > 8 else None
-
-
-        # job item abstracts the linkedIn Posting into a class with several fields
         job = JobItem()
 
-        # assigning the Job item its fields appropriately
-        # all fields have been stripped of whitespace but no other formatting (except as list items for certain fields) has been applied
         job['url'] = url
         job['title'] = title
         job['level'] = level
@@ -221,6 +144,6 @@ class LinkedinspiderSpider(scrapy.Spider):
         job['scrapedFrom'] = {"linkedIn": id}
         job['numApplicants'] = numApplicants
         
-        self.logger.info(f"\n\n\nScraped job: {job['title']} at {job['company']} for {job['salary'] if job['salary'] != None else 'x-x'}\n\n\n")
-
         yield job
+
+        self.logger.info(f"\n\n\nScraped job: {job['title']} at {job['company']} for {job['salary'] if job['salary'] != None else 'None'}\n\n\n")

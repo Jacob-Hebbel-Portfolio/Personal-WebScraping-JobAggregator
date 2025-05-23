@@ -69,11 +69,14 @@ class JobscraperPipeline:
         
         
         # standardizing timePosted in hours (as a float)
+
+        # conversions table find a string unit and applies the conversion onto the number
         conversions = {'second': 1/(60*60), 'seconds': 1/(60*60), 'minute': 1/60, 'minutes': 1/60, 
                        'hour': 1, 'hours': 1, 'day': 24, 'days': 24, 
                        'week': 7*24, 'weeks': 7*24, 'month': 30*24, 'months': 30*24, 'year': 365*24, 'years': 365*24}
         
 
+        # usual format: '$num $unit ago' ==> [$num, $unit, 'ago'] if its none make its time posted 1 day ago
         var = item['timePosted'].split(" ") if item['timePosted'] is not None else ['24', 'hours', 'ago']
         
         try:
@@ -90,9 +93,24 @@ class JobscraperPipeline:
                 item['timePosted'] = matches[0] if matches != [] else 24.0
 
         except Exception as e:
+            # if all else fails just write it as 24 hrs ago
             spider.logger.warning(f"Failed to convert timePosted: '{item['timePosted']}' - {e}")
             item['timePosted'] = 24.0
                 
 
+
+        # writing the scrape id as an integer
+        var = item['scrapedFrom']
+        if var is not None and all(var[key] is not None for key in var.keys()):
+            var = {key: int(var[key]) for key in var.keys()}
+        
+        else:
+            var = {key: None for key in var.keys()}
+
+        item['scrapedFrom'] = var
+
+
+
+        # returning fully-updated item ready for db insertion
         return item
     
