@@ -34,8 +34,12 @@ SELENIUM_BROWSER_EXECUTABLE_PATH = ''
 #SELENIUM_DRIVER_ARGUMENTS = ['--headless']
 
 # Rotating Proxy Settings
-from util import getXWorkingProxies
-ROTATING_PROXY_LIST = getXWorkingProxies(x=100)
+import asyncio
+from util import startProxyPool, PROXY_POOL
+
+# This blocks until 10 proxies are ready
+asyncio.run(startProxyPool())
+ROTATING_PROXY_LIST = PROXY_POOL.getInitialProxies()
 # settings for randomizing request frequency
 DOWNLOAD_DELAY = 1.5
 RANDOMIZE_DOWNLOAD_DELAY = True

@@ -165,12 +165,38 @@ class ScrapeOpsFakeBrowserHeaderAgentMiddleware:
         #print("*"*25 + "NEW HEADERS ATTACHED" + "*"*25)
         #print(request.headers)
 
+from scrapy import signals
+from util import PROXY_POOL
+
+class CustomProxyDownloaderMiddleware:
+
+    def __init__(self):
+        self.pool = PROXY_POOL
+    
+    @classmethod
+    def from_crawler(cls, crawler):
+        middleware = cls()              # closes session on SIGINT
+        crawler.signals.connect(middleware.spider_closed, signal=signals.spider_closed)
+        return middleware
+    
+    def process_request(self, request, spider):
+        request.meta['proxy'] = self.pool.getWorkingProxy()
+
+        if self.pool.isLow():
+            self.pool.testBadProxies()
+    
+    def spider_closed(self):
+        self.pool.close
+
+    
+
+
 
 # logic & loading imports
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException
+from selenium.common.exceptions import ElementNotInteractableException, NoSuchElementException, ElementClickInterceptedException, TimeoutException
 
 # misc imports
 from util import DriverPool
@@ -213,7 +239,7 @@ class SeleniumUndetectedDownloaderMiddleware:
 
         # responds with html page that has all the needed dynamic content
         spider.logger.info(f"\n\nreturning fully-loaded page\n\n")
-        spider.logger.info()
+        spider.logger.info(webDriver.page_source[:1000])
         return HtmlResponse(
             url=webDriver.current_url,
             body=webDriver.page_source,
@@ -227,41 +253,58 @@ class SeleniumUndetectedDownloaderMiddleware:
         scrollCount = 0                                             # curtails posisble inf behavior
         
         while loadedAllContent == False and scrollCount <= 25:      # loop until no more content to generate
-
+            spider.logger.info('attempting content generation action')
+            # button is present ==> button may be interactable
+            # IF INTERACTABLE: click button to generate new content
+            # IF !INTERACTABLE: scroll to generate new content
+            # IF !PRESENT: return page
             try:
-                spider.logger.info('attempting to click the button')
-
-                # button is present ==> button may be interactable
-                # IF INTERACTABLE: click button to generate new content
-                # IF !INTERACTABLE: scroll to generate new content
-                # IF !PRESENT: kill process 
+                # attempt generating content by finding & clicking button; this shouldn't work for a bit
                 button = webDriver.find_element(By.XPATH, "//button[contains(@class, '__show-more-button')]")
                 button.click()
-                webDriver.implicitly_wait(randint(2,5))
+                webDriver.implicitly_wait(randint(1,5))
+                spider.logger.info('successfully clicked button')
+            
+            # attempts other ways of clicking the button
+            except ElementClickInterceptedException:
+                webDriver.implicitly_wait(randint(2,7))
+                
+                try:        # clicking with selenium
+                    WebDriverWait(webDriver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, '//button[contains(@class, "__show-more-button")]'))
+                    )
+                    button = webDriver.find_element(By.XPATH, '//button[contains(@class, "__show-more-button")]')
+                    button.click()
+                    spider.logger.info('waited until overlay disappeared then clicked')
 
+                            # clicking with javascript (this one usually works over the other)
+                except (ElementClickInterceptedException, TimeoutException):
+                    button = webDriver.find_element(By.XPATH, '//button[contains(@class, "__show-more-button")]')
+                    webDriver.execute_script('arguments[0].click();', button)
+                    spider.logger.info('clicked button with javascript')
+
+            # attempts scrolling to make more content
             except ElementNotInteractableException:
-                # button is not interactable ==> do scroll action / location pair
+                # button is not interactable ==> do scroll action / location pair to generate content
                 spider.logger.info(f'no button found; doing scroll number {scrollCount} instead')
-                
-                loadedAllContent = True
-
-            except NoSuchElementException:
-                spider.logger.info("cannot make more content; returning page")
-                
-
-                # button is not present ==> scrolling makes more jobs appear
                 webDriver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                webDriver.implicitly_wait(randint(2,5))
+                webDriver.implicitly_wait(randint(1,5))
                 scrollCount+=1
 
-            if loadedAllContent:
-                spider.logger.info(f"leaving loadSearchResults after loading all possible jobs")
-            
-            elif scrollCount > 25:
-                spider.logger.info(f"leaving loadSearchResults after scrolling too much :(((")
+            except NoSuchElementException:
+                # button is not present ==> no more content to generate
+                spider.logger.info("cannot make more content; returning page")
+                loadedAllContent = True
+                
 
-            else:
-                spider.logger.warn("attempting to generate more content")
+        if loadedAllContent:
+            spider.logger.info(f"leaving loadSearchResults after loading all possible jobs")
+        
+        elif scrollCount > 25:
+            spider.logger.info(f"leaving loadSearchResults after scrolling too much :(((")
+
+        else:
+            spider.logger.warn("leaving search results and I don't know why ......")
 
     # frees drivers via .deleteDrivers()
     def spider_closed(self, spider):

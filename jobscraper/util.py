@@ -26,7 +26,7 @@ def loadDataFile(file):
 # proxifly has lists for other protocols & us-based proxies
 import requests
 
-def getProxies():
+def getProxyList():
     url = "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt"
     response = requests.get(url)
 
@@ -104,6 +104,104 @@ def getSalary(description):
     salary = salaryMatches[-1].strip() if salaryMatches != [] and len(salaryMatches[-1].strip()) > 8 else None
 
     return salary
+
+import asyncio
+import aiohttp
+
+class ProxyPool:
+
+    def __init__(self):
+        self.allProxies = set(getProxyList())
+        self.goodProxies = set()
+        self.badProxies = set()
+        self.session = None
+
+    def isLow(self):
+        return len(self.goodProxies) < 20 or len(self.badProxies) > 50
+
+    async def startSession(self):
+        self.session = aiohttp.ClientSession()
+
+    async def closeSession(self):
+        if self.session is not None:
+            await self.session.close()
+            self.session = None
+
+    async def getWorkingProxy(self):
+        
+        # returns a proxy from the goodProxy pool
+        # refills the pool if it is low
+        while len(self.goodProxies) < 10:
+            count = min(20, len(self.allProxies) - 1, 0) if count > 0 else 0
+            batch = [self.allProxies.pop() for _ in range(count)]
+            await self.testProxies(batch)
+
+        proxy = self.goodProxies.pop()
+        return proxy
+
+    
+    async def testBadProxies(self):
+        # takes the first 50 bad proxies and tests them
+        count = min(50, len(self.badProxies) - 1, 0)  if count > 0 else 0
+        batch = [self.badProxies.pop() for _ in range(count)]
+        await self.testProxies(batch)
+
+    async def validationTask(self, proxy):
+        # benchmark task for determining if a proxy is good / bad
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+
+        try:
+            async with self.session.get(
+                "https://www.linkedin.com", 
+                headers=headers, 
+                proxy=f"http://{proxy}", 
+                timeout=10
+            ) as r:
+                text = await r.text()
+                if r.status == 200 and "LinkedIn" in text:
+                    return True
+        except:
+            return False
+
+    async def testProxies(self, batch):
+        # aggregates which proxies to test and
+        # runs the validation task for each asynchronously
+
+        # collecting the tasks and executing them together
+        tasks = [self.validationTask(proxy) for proxy in batch]
+        results = await asyncio.gather(*tasks)
+
+        # sorting the proxies based on their result
+        for proxy, result in zip(batch, results):
+            if result:
+                self.goodProxies.add(proxy)
+            else:
+                self.badProxies.add(proxy)
+
+    async def getInitialProxies(self):
+        
+        # keeps getting new proxies until there are at least 10
+        while len(self.goodProxies) < 10:
+            count = min(20, len(self.allProxies) - 1) if count > 0 else 0
+            batch = [self.allProxies.pop() for _ in range(count)]
+            await self.testProxies(batch)
+
+        # returns 10 working proxies
+        return [self.goodProxies.pop() for _ in range(count)]
+
+PROXY_POOL = None
+async def startProxyPool():
+    global PROXY_POOL
+    PROXY_POOL = ProxyPool()
+    await PROXY_POOL.startSession()
+    await PROXY_POOL.getInitialProxies()
+
+# Run it synchronously before anything else uses PROXY_POOL
+asyncio.run(startProxyPool())
 
 
 import undetected_chromedriver as uc

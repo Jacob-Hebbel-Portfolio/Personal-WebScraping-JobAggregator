@@ -36,9 +36,12 @@ class LinkedinspiderSpider(scrapy.Spider):
 
 
     def parseSearch(self, response):
+        
+
+        # ========== getting & debugging jobs ========== 
 
         jobs = response.css("ul[class*='jobs-search__results-list'] li")
-        
+
         if len(jobs) == 0:
             self.logger.warning(f"no jobs found at: {response.url}")
             self.logger.warning(response.css("*").get()[:500])
@@ -47,6 +50,9 @@ class LinkedinspiderSpider(scrapy.Spider):
             self.logger.info(f"successfully scraped {len(jobs)} job(s) from {response.url}")
         for job in jobs:
             jobLink = job.css('a::attr(href)').get()
+
+
+            # ========== following link inside job ========== 
 
             if jobLink is not None:
                 yield response.follow(jobLink.strip().split('?')[0])
@@ -68,7 +74,7 @@ class LinkedinspiderSpider(scrapy.Spider):
             return
         
 
-        # ========== url/id and page parsing ========== 
+        # ========== url, id, and page parsing ========== 
 
         # parsing id & url
         regex = r"\d+"
