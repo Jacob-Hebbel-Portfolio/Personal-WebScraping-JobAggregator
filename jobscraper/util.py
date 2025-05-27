@@ -27,13 +27,7 @@ def loadDataFile(file):
 import requests
 
 def getProxyList():
-    url = "https://raw.githubusercontent.com/proxifly/free-proxy-list/main/proxies/protocols/http/data.txt"
-    response = requests.get(url)
-
-    if response.status_code != 200:
-        raise RuntimeError(f"Failed to fetch proxies: {response.status_code}")
-
-    proxies = [line.strip() for line in response.text.strip().splitlines() if line.strip()]
+    
     return proxies
 
 
@@ -100,109 +94,10 @@ def getSalary(description):
     # this is no means perfect but rides the edge of excluding valid salaries at the expense of not collecting false data. This heuristic can be tweaked without error to the code
     regex = r"(?:\$|£|€|₹|¥)?\s*\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?(?:\s*(?:-|to)\s*(?:\$|£|€|₹|¥)?\d{1,3}(?:,\d{3})*(?:\.\d+)?(?:\s*/\s*(?i:hr|hour|yr|year|mo|month))?)?"
     salaryMatches = sorted(re.findall(regex, descAsString), key=len) # heuristic: puts the longest match (most likely to be salary) at the back
-
+    
     salary = salaryMatches[-1].strip() if salaryMatches != [] and len(salaryMatches[-1].strip()) > 8 else None
 
     return salary
-
-import asyncio
-import aiohttp
-
-class ProxyPool:
-
-    def __init__(self):
-        self.allProxies = set(getProxyList())
-        self.goodProxies = set()
-        self.badProxies = set()
-        self.session = None
-
-    def isLow(self):
-        return len(self.goodProxies) < 20 or len(self.badProxies) > 50
-
-    async def startSession(self):
-        self.session = aiohttp.ClientSession()
-
-    async def closeSession(self):
-        if self.session is not None:
-            await self.session.close()
-            self.session = None
-
-    async def getWorkingProxy(self):
-        
-        # returns a proxy from the goodProxy pool
-        # refills the pool if it is low
-        while len(self.goodProxies) < 10:
-            count = min(20, len(self.allProxies) - 1, 0) if count > 0 else 0
-            batch = [self.allProxies.pop() for _ in range(count)]
-            await self.testProxies(batch)
-
-        proxy = self.goodProxies.pop()
-        return proxy
-
-    
-    async def testBadProxies(self):
-        # takes the first 50 bad proxies and tests them
-        count = min(50, len(self.badProxies) - 1, 0)  if count > 0 else 0
-        batch = [self.badProxies.pop() for _ in range(count)]
-        await self.testProxies(batch)
-
-    async def validationTask(self, proxy):
-        # benchmark task for determining if a proxy is good / bad
-
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept-Language": "en-US,en;q=0.9"
-        }
-
-        try:
-            async with self.session.get(
-                "https://www.linkedin.com", 
-                headers=headers, 
-                proxy=f"http://{proxy}", 
-                timeout=10
-            ) as r:
-                text = await r.text()
-                if r.status == 200 and "LinkedIn" in text:
-                    return True
-        except:
-            return False
-
-    async def testProxies(self, batch):
-        # aggregates which proxies to test and
-        # runs the validation task for each asynchronously
-
-        # collecting the tasks and executing them together
-        tasks = [self.validationTask(proxy) for proxy in batch]
-        results = await asyncio.gather(*tasks)
-
-        # sorting the proxies based on their result
-        for proxy, result in zip(batch, results):
-            if result:
-                self.goodProxies.add(proxy)
-            else:
-                self.badProxies.add(proxy)
-
-    async def getInitialProxies(self):
-        
-        # keeps getting new proxies until there are at least 10
-        while len(self.goodProxies) < 10:
-            count = min(20, len(self.allProxies) - 1) if count > 0 else 0
-            batch = [self.allProxies.pop() for _ in range(count)]
-            await self.testProxies(batch)
-
-        # returns 10 working proxies
-        return [self.goodProxies.pop() for _ in range(count)]
-
-PROXY_POOL = None
-async def startProxyPool():
-    global PROXY_POOL
-    PROXY_POOL = ProxyPool()
-    await PROXY_POOL.startSession()
-    await PROXY_POOL.getInitialProxies()
-
-# Run it synchronously before anything else uses PROXY_POOL
-asyncio.run(startProxyPool())
-
 
 import undetected_chromedriver as uc
 
@@ -211,25 +106,31 @@ class DriverPool:
         self.pool = []
 
     def getDriver(self, request):
+        
+        # proxy and header info are stored in requests.meta by the scrapeops middleware
         proxy = request.meta.get('proxy', {})
         headers = request.meta.get('fake_browser_headers', {})
         userAgent = headers.get('user-agent', None)
 
+        # looks for a driver w/ these configs in the current pool of drivers
         for driver in self.pool:
             if driver.proxy == proxy and driver.user_agent == userAgent:
                 return driver
 
+        # if none, make a new driver and return it
         newDriver = self.makeDriver(proxy, userAgent)
         self.pool.append(newDriver)
         return newDriver
 
     def makeDriver(self, proxy, userAgent):
+        
+        # options bypass sll popup and browser from opening
         chromeOptions = uc.ChromeOptions()
-        chromeOptions.add_argument("--headless")
-        chromeOptions.add_argument("--disable-blink-features=AutomationControlled")
-        chromeOptions.add_argument("--ignore-certificate-errors")
-        chromeOptions.add_argument("--no-sandbox")
+        chromeOptions.add_argument('--headless')
+        chromeOptions.add_argument('--ignore-certificate-errors')
+        chromeOptions.add_argument('--disable-blink-features=AutomationControlled')
 
+        # adds proxy & user agent to driver instance
         if proxy:
             chromeOptions.add_argument(f"--proxy-server={proxy}")
 
@@ -237,13 +138,14 @@ class DriverPool:
             chromeOptions.add_argument(f"--user-agent={userAgent}")
 
         driver = uc.Chrome(options=chromeOptions)
-
         driver.proxy = proxy
         driver.user_agent = userAgent
 
         return driver
 
     def deleteDrivers(self):
+
+        # cleans up pool
         for driver in self.pool:
             try:
                 driver.quit()

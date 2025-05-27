@@ -3,102 +3,6 @@
 # See documentation in:
 # https://docs.scrapy.org/en/latest/topics/spider-middleware.html
 
-from scrapy import signals
-
-# useful for handling different item types with a single interface
-from itemadapter import ItemAdapter
-
-class JobscraperSpiderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the spider middleware does not modify the
-    # passed objects.
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
-
-    def process_spider_input(self, response, spider):
-        # Called for each response that goes through the spider
-        # middleware and into the spider.
-
-        # Should return None or raise an exception.
-        return None
-
-    def process_spider_output(self, response, result, spider):
-        # Called with the results returned from the Spider, after
-        # it has processed the response.
-
-        # Must return an iterable of Request, or item objects.
-        for i in result:
-            yield i
-
-    def process_spider_exception(self, response, exception, spider):
-        # Called when a spider or process_spider_input() method
-        # (from other spider middleware) raises an exception.
-
-        # Should return either None or an iterable of Request or item objects.
-        pass
-
-    async def process_start(self, start):
-        # Called with an async iterator over the spider start() method or the
-        # maching method of an earlier spider middleware.
-        async for item_or_request in start:
-            yield item_or_request
-
-    def spider_opened(self, spider):
-        spider.logger.info("Spider opened: %s" % spider.name)
-
-
-class JobscraperDownloaderMiddleware:
-    # Not all methods need to be defined. If a method is not defined,
-    # scrapy acts as if the downloader middleware does not modify the
-    # passed objects.
-
-    @classmethod
-    def from_crawler(cls, crawler):
-        # This method is used by Scrapy to create your spiders.
-        s = cls()
-        crawler.signals.connect(s.spider_opened, signal=signals.spider_opened)
-        return s
-
-    def process_request(self, request, spider):
-        # Called for each request that goes through the downloader
-        # middleware.
-
-        # Must either:
-        # - return None: continue processing this request
-        # - or return a Response object
-        # - or return a Request object
-        # - or raise IgnoreRequest: process_exception() methods of
-        #   installed downloader middleware will be called
-        return None
-
-    def process_response(self, request, response, spider):
-        # Called with the response returned from the downloader.
-
-        # Must either;
-        # - return a Response object
-        # - return a Request object
-        # - or raise IgnoreRequest
-        return response
-
-    def process_exception(self, request, exception, spider):
-        # Called when a download handler or a process_request()
-        # (from other downloader middleware) raises an exception.
-
-        # Must either:
-        # - return None: continue processing this exception
-        # - return a Response object: stops process_exception() chain
-        # - return a Request object: stops process_exception() chain
-        pass
-
-    def spider_opened(self, spider):
-        spider.logger.info("Spider opened: %s" % spider.name)
-
-
 
 import requests
 from random import randint
@@ -165,29 +69,6 @@ class ScrapeOpsFakeBrowserHeaderAgentMiddleware:
         #print("*"*25 + "NEW HEADERS ATTACHED" + "*"*25)
         #print(request.headers)
 
-from scrapy import signals
-from util import PROXY_POOL
-
-class CustomProxyDownloaderMiddleware:
-
-    def __init__(self):
-        self.pool = PROXY_POOL
-    
-    @classmethod
-    def from_crawler(cls, crawler):
-        middleware = cls()              # closes session on SIGINT
-        crawler.signals.connect(middleware.spider_closed, signal=signals.spider_closed)
-        return middleware
-    
-    def process_request(self, request, spider):
-        request.meta['proxy'] = self.pool.getWorkingProxy()
-
-        if self.pool.isLow():
-            self.pool.testBadProxies()
-    
-    def spider_closed(self):
-        self.pool.close
-
     
 
 
@@ -206,10 +87,15 @@ from random import randint
 from scrapy import signals
 
 
+'''
+This middleware interacts with the browser page to generate dynamic content. This is done via a webdriver (undetectable chrome)
+that observes the state of page content. It waits for the content to load then interacts with it, or observes an implicit wait signal.
+'''
 class SeleniumUndetectedDownloaderMiddleware:
 
     def __init__(self):
 
+        # driver pool instance to access web drivers
         self.drivers = DriverPool()
 
     @classmethod
@@ -218,42 +104,50 @@ class SeleniumUndetectedDownloaderMiddleware:
         crawler.signals.connect(middleware.spider_closed, signal=signals.spider_closed)
         return middleware
 
-    # executes webdriver behavior here 
+    # dictates webdriver behavior
     def process_request(self, request, spider):
         
         # gets the web driver
         webDriver = self.drivers.getDriver(request)
         webDriver.get(request.url)
-        spider.logger.info(f"\n\nprocessing request to {request.url}\n\n")
+        spider.logger.info(f"Middleware:\tprocessing request to {request.url}")
+        webDriver.implicitly_wait(randint(1,5))
 
         # determines what action to do
         path = urlparse(request.url).path
         if 'search' in path:
-            spider.logger.info(f"\n\nexecuting job search logic\n\n")
+            spider.logger.debug(f"Middleware:\texecuting job search logic")
             self.loadSearchResults(webDriver, spider)
         
         elif 'view' in path:
-            spider.logger.info(f"\n\nexecuting job view logic\n\n")
+            spider.logger.debug(f"Middleware:\texecuting job view logic")
             wait = WebDriverWait(webDriver, 10)
             wait.until(EC.presence_of_element_located((By.XPATH, "//*[contains(@class, 'num-applicants__caption')]")))
 
+        elif 'authwall' in path:
+            spider.logger.error(f"Middleware:\tauthwall encountered")
+
         # responds with html page that has all the needed dynamic content
-        spider.logger.info(f"\n\nreturning fully-loaded page\n\n")
-        spider.logger.info(webDriver.page_source[:1000])
+        spider.logger.debug(f"Middleware:\treturning fully-loaded page")
+        spider.logger.debug(webDriver.page_source[:1000])
+        
+        url = webDriver.current_url
+        page = webDriver.page_source
+
         return HtmlResponse(
-            url=webDriver.current_url,
-            body=webDriver.page_source,
+            url=url,
+            body=page,
             request=request,
             encoding='utf-8'
         )
     
     def loadSearchResults(self, webDriver, spider):
 
-        loadedAllContent = False                                    # turns True to tell webdriver to stop trying
-        scrollCount = 0                                             # curtails posisble inf behavior
+        loadedAllContent = False                                    # tells webdriver when to stop loading page
+        actionCount = 0                                             # curtails posisble inf behavior
         
-        while loadedAllContent == False and scrollCount <= 25:      # loop until no more content to generate
-            spider.logger.info('attempting content generation action')
+        while loadedAllContent == False and actionCount < 5:       # loop until no more content to generate
+            #spider.logger.info('attempting content generation action')
             # button is present ==> button may be interactable
             # IF INTERACTABLE: click button to generate new content
             # IF !INTERACTABLE: scroll to generate new content
@@ -263,7 +157,8 @@ class SeleniumUndetectedDownloaderMiddleware:
                 button = webDriver.find_element(By.XPATH, "//button[contains(@class, '__show-more-button')]")
                 button.click()
                 webDriver.implicitly_wait(randint(1,5))
-                spider.logger.info('successfully clicked button')
+                #spider.logger.info('successfully clicked button')
+                actionCount+=1
             
             # attempts other ways of clicking the button
             except ElementClickInterceptedException:
@@ -275,38 +170,40 @@ class SeleniumUndetectedDownloaderMiddleware:
                     )
                     button = webDriver.find_element(By.XPATH, '//button[contains(@class, "__show-more-button")]')
                     button.click()
-                    spider.logger.info('waited until overlay disappeared then clicked')
+                    #spider.logger.info('waited until overlay disappeared then clicked')
+                    actionCount +=1
 
                             # clicking with javascript (this one usually works over the other)
                 except (ElementClickInterceptedException, TimeoutException):
                     button = webDriver.find_element(By.XPATH, '//button[contains(@class, "__show-more-button")]')
                     webDriver.execute_script('arguments[0].click();', button)
-                    spider.logger.info('clicked button with javascript')
+                    #spider.logger.info('clicked button with javascript')
+                    actionCount+=1
 
             # attempts scrolling to make more content
             except ElementNotInteractableException:
                 # button is not interactable ==> do scroll action / location pair to generate content
-                spider.logger.info(f'no button found; doing scroll number {scrollCount} instead')
+                #spider.logger.info(f'no button found; doing scroll number {actionCount} instead')
                 webDriver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 webDriver.implicitly_wait(randint(1,5))
-                scrollCount+=1
+                actionCount+=1
 
             except NoSuchElementException:
                 # button is not present ==> no more content to generate
                 spider.logger.info("cannot make more content; returning page")
                 loadedAllContent = True
                 
-
-        if loadedAllContent:
-            spider.logger.info(f"leaving loadSearchResults after loading all possible jobs")
         
-        elif scrollCount > 25:
-            spider.logger.info(f"leaving loadSearchResults after scrolling too much :(((")
+        if loadedAllContent:
+            spider.logger.info(f"Middleware:\tleaving loadSearchResults after loading all possible jobs")
+        
+        elif actionCount == 5:
+            spider.logger.info(f"Middleware:\tleaving loadSearchResults after 5 actions")
 
         else:
-            spider.logger.warn("leaving search results and I don't know why ......")
+            spider.logger.warning("Middleware:\tleaving search results and I don't know why ......")
 
     # frees drivers via .deleteDrivers()
     def spider_closed(self, spider):
         self.drivers.deleteDrivers()
-        spider.logger.info("all selenium drivers successfully closed.")
+        spider.logger.info("Middleware:\tall selenium drivers successfully closed.")

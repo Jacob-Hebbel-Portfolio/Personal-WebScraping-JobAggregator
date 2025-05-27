@@ -19,7 +19,7 @@ FEEDS = {
         'store-empty': False
     }
 }
-LOG_FILE = "../output/output.log"
+#LOG_FILE = "../output/output.log"
 LOG_LEVEL = 'INFO'
 ADDONS = {}
 
@@ -34,12 +34,9 @@ SELENIUM_BROWSER_EXECUTABLE_PATH = ''
 #SELENIUM_DRIVER_ARGUMENTS = ['--headless']
 
 # Rotating Proxy Settings
-import asyncio
-from util import startProxyPool, PROXY_POOL
+#ROTATING_PROXY_LIST_PATH = '../data/proxies.txt'
 
-# This blocks until 10 proxies are ready
-asyncio.run(startProxyPool())
-ROTATING_PROXY_LIST = PROXY_POOL.getInitialProxies()
+#ROTATING_PROXY_PAGE_RETRY_TIMES = 10
 # settings for randomizing request frequency
 DOWNLOAD_DELAY = 1.5
 RANDOMIZE_DOWNLOAD_DELAY = True
@@ -83,8 +80,8 @@ ROBOTSTXT_OBEY = False
 # See https://docs.scrapy.org/en/latest/topics/downloader-middleware.html
 DOWNLOADER_MIDDLEWARES = {
     'jobscraper.middlewares.ScrapeOpsFakeBrowserHeaderAgentMiddleware': 400,
-    'rotating_proxies.middlewares.RotatingProxyMiddleware': 610,
-    'rotating_proxies.middlewares.BanDetectionMiddleware': 620,
+    #'rotating_proxies.middlewares.RotatingProxyMiddleware': 610,
+    #'rotating_proxies.middlewares.BanDetectionMiddleware': 620,
     'jobscraper.middlewares.SeleniumUndetectedDownloaderMiddleware': 800,
     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,
 }
@@ -104,7 +101,8 @@ ITEM_PIPELINES = {
 
 # Enable and configure the AutoThrottle extension (disabled by default)
 # See https://docs.scrapy.org/en/latest/topics/autothrottle.html
-AUTOTHROTTLE_ENABLED = True
+CONCURRENT_REQUESTS_PER_DOMAIN = 1
+AUTOTHROTTLE_ENABLED = False
 # The initial download delay
 AUTOTHROTTLE_START_DELAY = 5
 # The maximum download delay to be set in case of high latencies
